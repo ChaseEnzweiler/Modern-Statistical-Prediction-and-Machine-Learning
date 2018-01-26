@@ -1,0 +1,182 @@
+---
+title: "Kmeans"
+author: "Chase Enzweiler"
+date: "11/27/2017"
+output: html_document
+---
+
+# K-means Clustering
+
+\ 
+\ 
+Implement a function my_kmeans() that performs the k-means algorithm.
+\ 
+```{r}
+#input: X: an nxp matrix, k: the desired number of clusters
+# output: list(cluster_sizes: length k vector of cluster sizes, cluster means: kxp matrix with centroids as rows, clustering_vector: vector length n containing cluster assignment, wss_cluster: vector length k containing wss of clusters, bss_over_tss: bss/tss )
+
+
+my_kmeans <- function(X, k){
+  
+  # 1. select k random rows from the data and make them initial centroids
+  
+  select <- sample.int(dim(X)[1], size = k, replace = FALSE)
+  
+  # matrix of initial centroids
+  
+  old_centroid <- matrix(0, ncol = dim(X)[2], nrow = k)
+  
+  new_centroid <- X[select,]
+  
+  while(all(old_centroid != new_centroid)){
+  
+  # 2. calculate the distances between observations and centroids
+  
+  # vectors of calculated distances stored in a list
+  dist_vectors <- list()
+  
+  for (i in 1:k){
+    
+    # distances for each observation to centroid stored in vector
+    dist_store <- c(rep(0,dim(X)[1]))
+    
+    for (j in 1:dim(X)[1]){
+      
+      dist_store[j] <- sqrt(sum((X[j,] - new_centroid[i,])^2))
+      
+    }
+    
+    dist_vectors[[i]] <- dist_store
+  
+  }
+  # now we can create an nxk matrix that has all the distances for each point in the rows with respect to each cluster which is column k.
+  
+  dist_matrix <- do.call(cbind, dist_vectors)
+  
+  # create a list storing vectors of indices assigned to each cluster
+  assign_vect <- c(rep(0,dim(dist_matrix)[1]))
+  
+  for (i in 1:dim(dist_matrix)[1]){
+    
+    # vector of assigned cluster for each observation
+    assign_vect[i] <- which.min(dist_matrix[i,])
+    
+    
+  }
+  
+  # assign the old centroid to new and create new centroid from clusters
+  
+  old_centroid <- new_centroid
+  
+  cluster_sizes <- c(rep(0,k))
+  
+  for (i in 1:k){
+    
+     cluster <- X[which(assign_vect == i),]
+     
+     new_centroid[i,] <- colMeans(cluster)
+     
+     cluster_sizes[i] <- dim(cluster)[1]
+     
+  }
+  
+  }
+  
+  cluster_means <- new_centroid
+  
+  clustering_vector <- assign_vect
+  
+  # calculate the wss
+  
+  wss <- c(rep(0, k))
+  
+  for (i in 1:k){
+    
+    wss[i] <-sum((t(t(X[which(assign_vect == i),]) - cluster_means[i,]))^2)
+    
+  }
+  
+  tss <- sum((t(t(X) - colMeans(X)))^2)
+  
+  bss_over_tss <- (tss - sum(wss))/tss
+  
+return(list(cluster_sizes = cluster_sizes,cluster_means = cluster_means,clustering_vector = clustering_vector,wss_cluster = wss, bss_over_tss = bss_over_tss))
+  
+}
+
+
+```
+\ 
+\ 
+run my_kmeans with iris data and k = 3 and compare it to the function kmeans
+\ 
+```{r}
+# my kmeans function
+set.seed(90)
+my_kmeans(iris[,1:4], 3)
+```
+\ 
+\ 
+R's k means function
+\ 
+```{r}
+# R's kmean function
+set.seed(1)
+kmeans(iris[,1:4], 3)
+```
+
+\ 
+\ 
+
+### Hierarchical Clustering
+
+\ 
+```{r}
+# complete
+hc.complete <- hclust(dist(iris[,1:4]), method = "complete")
+
+# single 
+hc.single <- hclust(dist(iris[,1:4]), method = "single")
+
+# average
+hc.average <- hclust(dist(iris[,1:4]), method = "average")
+
+plot(hc.complete)
+
+plot(hc.single)
+
+plot(hc.average)
+
+# use cutree with k = 3
+cut_complete <- cutree(hc.complete, k = 3)
+
+cut_single <- cutree(hc.single, k = 3)
+
+cut_average <- cutree(hc.average, k = 3)
+
+cut_complete
+
+cut_single
+
+cut_average
+
+```
+
+\ 
+\ 
+Based on the results from cutree it seems that complete and average perform well for 3 clusters. Single does not perform as well because it has singletons for the third cluster where the third cluster only has 2 observations
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

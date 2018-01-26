@@ -1,0 +1,283 @@
+---
+title: "LogisticRegression"
+author: "Chase Enzweiler"
+date: "10/23/2017"
+output: html_document
+---
+
+```{r}
+# credit default data
+library(ISLR)
+library(FactoMineR)
+library(ggplot2)
+```
+
+\ 
+\ 
+Run logistic regression
+\ 
+\ 
+
+```{r}
+# logistic regression
+
+n <- dim(Default)[1]
+
+p <- dim(Default)[2]
+
+
+# logistic regression
+log_reg_default <- glm(default ~ balance, family = binomial, data = Default)
+
+summary(log_reg_default)$coefficients
+
+```
+\ 
+\ 
+use predict() to obtain the probability of default for individuals with balance of 100, 200, ..., 2000
+\ 
+\ 
+```{r}
+# predictions
+
+# new data the balances 
+new_data <- data.frame(seq(100, 2000, 100))
+colnames(new_data) <- c("balance")
+
+predict(log_reg_default, newdata = new_data, type = "response" )
+
+```
+\ 
+\ 
+Now fit a logistic regression model by regressing default on student. Intepret the coefficient estimate
+\ 
+\ 
+```{r}
+# default of student
+
+log_reg_stu <- glm(default ~ student, family = binomial, data = Default)
+
+summary(log_reg_stu)$coefficients
+
+```
+\ 
+our coefficient estimate for studentYes is positive and therefore the students have a better chance at defaulting than non-students
+\ 
+\ 
+Now regress default on student, balance, and income.
+\ 
+\ 
+```{r}
+# logistic regression on student balance and income
+
+log_reg_bsi <- glm(default ~ balance + student + income, family = binomial, data = Default)
+
+summary(log_reg_bsi)$coefficients
+```
+\ 
+NO not all coefficients are significant, balance and income have large p values.
+\ 
+\ 
+The contradiction between the coefficient for studentYes in this model and studentYes in the last model is that overall from the last model the students are more likely to default then the non-students. However in the new model, it tells us that given a paticular income and balance a student is less likely to default than a non-student. Confounding effect.
+\ 
+\ 
+
+### Stock Market data
+
+\ 
+\ 
+```{r}
+# PCA on stockmarket data
+cor_mat <- cor(Smarket[,-9])
+
+PCA(Smarket[,-9])
+
+```
+\ 
+\ 
+the lag variables are not very well correlated with the today variable and they have correlations close to zero. The previous days returns are not well correlated with todays returns. 
+\ 
+\ 
+```{r}
+# make a scatter plot of the year and the volume
+ggplot(data = Smarket, aes(Year, Volume)) + geom_point()
+
+```
+\ 
+\ 
+
+### Logistic Regression
+
+\ 
+\ 
+```{r}
+# logistic regression direction on lags and volume
+
+market_log_reg <- glm(Direction ~ Lag1 + Lag2 + Lag3 + Lag4 + Lag5 + Volume, family = binomial, data = Smarket)
+
+summary(market_log_reg)
+
+```
+\ 
+\ 
+Looking at the p values of the coefficients we can see that none of the coefficients are statistically significant. The coefficient of Lag1 is -0.073074, we interpret this as the market is more likely to go down when Lag1 gets good returns???
+\ 
+\ 
+```{r}
+# predict
+predict(market_log_reg, newdata = Smarket, type = "response")[1:10]
+
+```
+
+\ 
+\ 
+### Estimation of Parameters
+
+\ 
+\ 
+```{r}
+# Newton Raphson Method
+library(MASS)
+
+Newt_Raph <- function(formula, response , data){
+  
+  # get column vector of the response
+  y <- response
+  
+  # create design matrix (n x p+1)
+  X <- model.matrix(formula, data = data)
+  
+  n <- dim(X)[1]
+  
+  p <- dim(X)[2] 
+  
+  # old coefficient estimates vector originally set to zero
+  B_old <- rep(1, p)
+  
+  # create variable of vector of new coefficients 
+  B_new <- rep(0, p)
+  
+  
+  # iterate until B_old and B_new are "close"
+  while (!identical(round(B_old, digits = 2), round(B_new, digits = 2))){
+    
+    # set B_old to B_new
+    
+    B_old <- B_new
+    
+    # compute p, the n vector of fitted probabilites with ith element
+    # of p(xi, B_old), transposes in equation dont translate
+    
+    # fitted probabilities vector length n
+    P <- c()
+    
+    # elements of diagonal of W, vector length n
+    W_elem <- c()
+    
+    for (i in 1 : n){
+      
+      P[i] <- exp( X[i,] %*% B_old ) / ( 1 + exp( X[i,] %*% B_old ))
+      
+      # compute the i elements for the diagonal of matrix W
+      
+      W_elem[i] <- P[i] * (1 - P[i])
+
+    }
+    
+    # calculate z
+    
+    z <- (X %*% B_old) + solve(diag(W_elem)) %*% (y - P)
+    
+    # calculate our new estimated coefficients
+    B_new <- solve(t(X) %*% diag(W_elem) %*% X) %*% t(X) %*% diag(W_elem) %*% z
+    
+  }
+  
+  return(list("coefficients" = B_new))
+  
+}
+
+market <- Smarket
+
+# convert UP/Down to 1's and 0's
+market$Direction <- as.numeric(Smarket$Direction)-1
+
+Newt_Raph(Direction ~ Lag1 + Lag2 + Lag3 + Lag4 + Lag5 + Volume, response = market$Direction, data = market)
+```
+
+\ 
+\ 
+
+Simple Newton Raphson
+
+\ 
+```{r}
+# simple newton raphson
+Simple_Newt_Raph <- function(formula, response , data){
+  
+  # get column vector of the response
+  y <- response
+  
+  # create design matrix (n x p+1)
+  X <- model.matrix(formula, data = data)
+  
+  n <- dim(X)[1]
+  
+  p <- dim(X)[2]
+  
+  # old coefficient estimates vector originally set to zero
+  B_old <- rep(1, p )
+  
+  # create variable of vector of new coefficients 
+  B_new <- rep(0, p )
+  
+  X_tilda <- matrix(0, ncol = p, nrow = n)
+  
+  # iterate until B_old and B_new are "close"
+  while (!identical(round(B_old, digits = 2), round(B_new, digits = 2))){
+    
+    # set B_old to B_new
+    
+    B_old <- B_new
+    
+    # compute p, the n vector of fitted probabilites with ith element
+    # of p(xi, B_old), transposes in equation dont translate
+    
+    # fitted probabilities vector length n
+    P <- c()
+    
+    # elements of diagonal of W, vector length n
+    W_elem <- c()
+    
+    for (i in 1 : n){
+      
+      P[i] <- exp( X[i,] %*% B_old ) / ( 1 + exp( X[i,] %*% B_old ))
+      
+      # compute the i elements for the diagonal of matrix W
+      
+      W_elem[i] <- P[i] * (1 - P[i])
+      
+      X_tilda[i, ] <- X[i, ] * W_elem[i]
+      
+    }
+    
+  
+ 
+    
+    # calculate our new estimated coefficients
+    B_new <- B_old + solve(t(X) %*% X_tilda) %*% t(X) %*% (y - P)
+    
+   }
+  
+  return(list("coefficients" = B_new))
+  
+}
+
+# says t(X) %*% X is computationally singular
+
+Simple_Newt_Raph(Direction ~ Lag1 + Lag2 + Lag3 + Lag4 + Lag5 + Volume, response = market$Direction, data = market)
+```
+
+
+
+

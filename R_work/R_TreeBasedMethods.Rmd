@@ -1,0 +1,196 @@
+---
+title: "TreeBasedMethods"
+author: "Chase Enzweiler"
+date: "11/20/2017"
+output: html_document
+---
+
+# Tree Based Methods
+
+
+\ 
+\ 
+```{r}
+library(ISLR)
+library(tree)
+library(randomForest)
+library(gbm)
+```
+\ 
+\ 
+```{r}
+attach(Carseats)
+High <- ifelse(Sales <= 8, "No", "Yes")
+carseats <- data.frame(Carseats, High)
+
+```
+\ 
+fit a decision tree. describe the output of summary, plot, text, and display
+\ 
+```{r}
+# fit the decision tree
+tree_carseats <- tree(High ~ . -Sales, data = carseats)
+
+summary(tree_carseats)
+
+plot(tree_carseats)
+text(tree_carseats, pretty = 0)
+
+```
+\ 
+\ 
+
+
+Looking at the summary of our tree we can find our overall misclassification error rate for our 400 observations, which gives us a good training misclassification rate. It also gives the the amount of terminal nodes which means our tree was split many times. From our tree we see that the first split is of shelf location which means shelf location is a good indicator of sales as is price which is the next split in our tree. 
+```{r}
+tree_carseats
+```
+\ 
+
+
+The output of tree_carseats shows us all the splits for each node and which nodes are terminal nodes, it also gives us proportions of the responses in each node.
+\ 
+
+### Random Forests
+
+\ 
+
+```{r}
+# create training data using 80% observations
+samp <- sample(1:dim(carseats)[1], size =  floor(.8 * dim(carseats)[1]))
+train <- carseats[samp,]
+
+test <- carseats[-samp,]
+
+# fit random forest on the training data, High on all but sales
+forest <- randomForest(High ~ . - Sales, data = train, xtest = test[,-c(1,12) ], ytest = test[,12], importance = TRUE)
+
+# we can compute the test error rate using forest$test
+head(forest$test$err.rate, 30)
+
+# get the oob error rate
+head(forest$err.rate, 30)
+```
+\ 
+
+
+compared to the test error rates the out of box error rates are overall higher than the test error.
+\ 
+```{r}
+# view the importance of each variable
+importance(forest)
+
+# create a visualization with varImpPlot()
+varImpPlot(forest, main = "Variable Importance of Forest")
+```
+\ 
+
+
+The variables that are most important are Price and ShelveLoc, they have the greatest decreases in mean accuracy and mean gini.
+\ 
+
+### Boosted Trees
+
+\ 
+Compute the test error rate for boosted trees
+\ 
+```{r}
+# gbm package needs response in [0,1]
+train$High <- as.integer(train$High) - 1
+test$High <- as.integer(test$High) - 1
+```
+\ 
+fit the boosted tree
+\ 
+```{r}
+# fit boosted trees B = 5000, cutoff = .5
+boosted_tree <- gbm(High ~ . -Sales, distribution = "bernoulli" , data = train, n.trees = 5000)
+```
+\ 
+run summary fo the train boosted trees
+\ 
+```{r}
+summary(boosted_tree)
+```
+\ 
+The most important variables are ShelveLoc and Price.
+\ 
+\ 
+predict and comput the test error rate 
+```{r}
+# predict with n.trees [10, 20, ..., 5000]
+boosted_predict <- predict(boosted_tree, newdata = test, n.trees = seq(10, 5000, by = 10), type = "response")
+
+# convert the probabilities to same type 1 or 0 as High in training and test, using cutoff .5 
+class_predictions <- ifelse(boosted_predict <.5, 0, 1)
+
+# calculate test error rate for each number of tree iteration
+test_error_rates <- class_predictions == test$High
+
+# test error is 1 - test accuracy
+test_error_rates <- 1 - colMeans(test_error_rates)
+
+```
+\ 
+plot the test error rates against the number of trees
+\ 
+```{r}
+plot(test_error_rates, xlab = "Number of Trees", ylab = "Test Error", main = "Test Error vs. Number of Trees", col = "purple")
+lo <- loess(test_error_rates ~ seq(10, 5000, by = 10))
+lines(predict(lo), col = "green", lwd = 3)
+```
+\ 
+\ 
+redo the last part with different interaction depths
+\ 
+```{r}
+# interaction depth 2,3,4
+
+test_error_by_depth <- list()
+
+for (i in 2:4){
+  
+  boosted_tree_loop <- gbm(High ~ . -Sales, distribution = "bernoulli" , data = train, n.trees = 5000, interaction.depth = i)
+  
+  loop_predict <- predict(boosted_tree_loop, newdata = test, n.trees = seq(10, 5000, by = 10), type = "response")
+  
+  
+  # convert the probabilities to same type 1 or 0 as High in training and test, using cutoff .5 
+  class_predictions_loop <- ifelse(loop_predict <.5, 0, 1)
+
+  # calculate test error rate for each number of tree iteration
+  test_error_rates_loop <- class_predictions_loop == test$High
+
+  # test error is 1 - test accuracy
+  test_error_rates_loop <- 1 - colMeans(test_error_rates_loop)
+  
+  test_error_by_depth[[i-1]] <- test_error_rates_loop
+   
+}
+
+```
+\ 
+\ 
+plot test error rates against number of trees given different interaction depths 
+\ 
+```{r}
+# ineraction depth 2
+plot(test_error_by_depth[[1]], xlab = "Number of Trees", ylab = "Test Error", main = "Depth d=2", col = "purple")
+lo <- loess(test_error_by_depth[[1]] ~ seq(10, 5000, by = 10))
+lines(predict(lo), col = "green", lwd = 3)
+
+#interaction depth 3
+plot(test_error_by_depth[[2]], xlab = "Number of Trees", ylab = "Test Error", main = "Depth d=3", col = "cyan")
+lo <- loess(test_error_by_depth[[2]] ~ seq(10, 5000, by = 10))
+lines(predict(lo), col = "orange", lwd = 3)
+
+# interaction depth 4
+plot(test_error_by_depth[[3]], xlab = "Number of Trees", ylab = "Test Error", main = "Depth d=4", col = "yellow")
+lo <- loess(test_error_by_depth[[3]] ~ seq(10, 5000, by = 10))
+lines(predict(lo), col = "red", lwd = 3)
+
+
+```
+\ 
+
+There are only slight differences in our error curves, All of their test error generally derease as the number of trees used increase. With depth 4 it seams to have the lowest test error rate overall.

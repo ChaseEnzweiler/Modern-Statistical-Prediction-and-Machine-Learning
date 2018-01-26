@@ -1,0 +1,594 @@
+---
+title: "PredictiveModelComparison"
+author: "Chase Enzweiler"
+date: "10/12/2017"
+output: html_document
+---
+
+\ 
+```{r}
+# packages
+library(ElemStatLearn)
+library(broom)
+library(leaps)
+library(pls)
+library(caret)
+library(ggplot2)
+library(glmnet)
+library(knitr)
+```
+\ 
+\ 
+load the prostate data 
+\ 
+\ 
+```{r}
+# prostate data
+data <- prostate
+
+# training data 
+training <- data[data$train == TRUE,-10]
+
+# test data 
+test <- data[data$train == FALSE, -10]
+
+```
+\ 
+Obtain a matrix of correlation of the predictors
+\ 
+```{r}
+# matrix of correlations of predictors, -9 removes lpsa
+cor_mat <- cor(training[,-9])
+```
+\ 
+\ 
+Standardize the predictors and confirm summary statistics
+\ 
+\ 
+```{r}
+# standardize the predictors
+
+stand_train <- as.data.frame(scale(training))
+
+# standardized training predictors
+
+stand_train_pred <- stand_train[,-9]
+
+# confirm summary staatistics 
+
+summary(stand_train_pred)
+```
+\ 
+\ 
+
+### Ordinary Least Squares
+\ 
+\ 
+Now fit an ordinary least squares regression by regressing lpsa on the rest of the predictors
+\ 
+\ 
+```{r}
+# fit ols model 
+ols_fit <- lm(training$lpsa ~ ., data = stand_train_pred)
+
+# create a table of the estimates and standard errors
+
+ols_table <- tidy(ols_fit)[,1:3]
+
+ols_table$estimate <- round(ols_table$estimate, digits = 3)
+ols_table$std.error <- round(ols_table$std.error, digits = 3)
+
+ols_table
+```
+\ 
+\ 
+
+### Best Subset Regression
+\ 
+
+Now find the best subset regression
+\ 
+\ 
+```{r}
+# best subset regression using regsubsets() exhaustive
+
+subset_reg <- regsubsets(training$lpsa ~ ., data = stand_train_pred)
+
+subset_reg_summ  <- summary(subset_reg)
+
+subset_reg_summ
+```
+\ 
+\ 
+Now to choose the best overall model, we can plot the RSS, adjusted $R^2$, $C_p$, and BIC
+\ 
+\ 
+```{r}
+# subset model selection plots
+
+##### code from introduction to statistical learning #####
+
+# fix this with creating plots from ggplot
+# remove cross validation part when submitting to homework, just reference the BIC for subset model selection
+
+# create the plots
+
+#par(mfrow = c(2,2))
+
+# can do with ggplot also 
+
+# RSS
+plot(subset_reg_summ$rss, xlab = "Number of Variables", ylab = "RSS", type = "l")
+
+# adj R squared 
+
+plot(subset_reg_summ$adjr2, xlab = "Number of Variables", ylab = "adjR2", type = "l")
+
+# location of max of adjR2
+adjR2_max <- which.max(subset_reg_summ$adjr2)
+
+points(adjR2_max, subset_reg_summ$adjr2[adjR2_max], col = "green", cex = 2, pch = 20)
+
+# Cp
+
+plot(subset_reg_summ$cp, xlab = "Number of Variables", ylab = "Cp", type = "l")
+#location of min
+cp_min <- which.min(subset_reg_summ$cp)
+#point for min
+points(cp_min, subset_reg_summ$cp[cp_min], col = "green", cex = 2, pch = 20 )
+
+# BIC
+
+plot(subset_reg_summ$bic, xlab = "Number of Variables", ylab = "BIC", type = "l")
+
+# location of min of BIC
+bic_min <- which.min(subset_reg_summ$bic)
+
+#plot min
+
+points(bic_min, subset_reg_summ$bic[bic_min], col = "green", cex = 2, pch = 20)
+
+```
+\ 
+\ 
+\ 
+We can see that the BIC is lowest for the 2 variable model. With subset regression we can also check the test error of each model by validation set approach or cross validation. In the book Elements of Statistical Learning they choose 2 variable model based on the BIC, however i will use cross validation 
+\ 
+\ 
+```{r}
+set.seed(1)
+
+# Code written in reference to Introduction to Statistical Learning #
+# Code similiar to Lab at end of chapter 6
+
+# Create folds
+folds <- sample(1:10 ,size = nrow(training), replace = TRUE )
+
+# matrix of the test errors
+test_error <- matrix(NA, ncol = 8, nrow = 10)
+
+# best subset regression 
+
+for(i in 1 : 10){
+  
+  # vector to hold model test mse
+  MSE <- rep(NA, 8)
+  
+  # fit each model to training folds
+  best_subreg <- regsubsets( training[folds != i, ]$lpsa ~ ., data = stand_train_pred[folds != i, ])
+
+  for (j in 1:8){
+    
+    # creates a design matrix for the test folds
+    test_design_mat <- model.matrix(training[folds == i, ]$lpsa ~ ., data = stand_train_pred[folds == i, ])
+    
+    # coefficients of the fit model fitted with # folds != i
+    sub_coef <- coef(best_subreg, j)
+  
+    # fitted test values
+    # basically X %*% B
+    fitted <- test_design_mat[, names(sub_coef)] %*% sub_coef
+    
+    # stores mse for each model 
+    MSE[j] <- mean((training[folds == i,]$lpsa - fitted)^2)
+  
+  }
+  
+  # stores test mse for each model for each k fold
+  test_error[i,] <- MSE
+}
+
+# calculates the mean of test mse for each model
+avg_test_MSE <- apply(test_error, 2, mean)
+
+# find the model with the lowest mean test mse
+
+which.min(avg_test_MSE)
+```
+\ 
+\ 
+From 10 fold cross validation, our optimal best subset regression model is the model with 7 variables. 
+\ 
+```{r}
+# our best subset regression optimal model
+coef(subset_reg, 7)
+
+
+```
+\ 
+\ 
+\ 
+
+### PCR and PLSR
+
+\ 
+\ 
+
+Fit a principal component regression model with the training data using ten fold cross validation 
+\ 
+\ 
+```{r}
+# principal component regression
+
+set.seed(1)
+
+# validation = "CV" performs 10 fold cv for each number of components
+
+pcr_fit <- pcr(training$lpsa ~ ., data = stand_train_pred, scale = FALSE, validation = "CV" )
+
+summary(pcr_fit)
+```
+\ 
+plot the standardized coefficients against the components
+\ 
+
+```{r}
+# matrix of the coefficients
+
+pcr_coef_matrix <- matrix(pcr_fit$coefficients, nrow = 8, ncol = 8)
+
+rownames(pcr_coef_matrix) <- colnames(stand_train_pred)
+
+pcr_coef_matrix <- t(pcr_coef_matrix)
+
+# profiles of coefficients plot
+
+matplot(c(1,2,3,4,5,6,7,8), pcr_coef_matrix[,1:8], type = "s", lty = 1, col = c("red", "blue", "green", "purple", "yellow", "orange", "cyan", "pink"), xlab = "Number of Components", ylab = "Standardized Coefficients")
+
+legend(1,.75, colnames(pcr_coef_matrix), cex = .45 , lty=c(1,1), lwd=c(1,1), col=c("red", "blue", "green", "purple", "yellow", "orange", "cyan", "pink"))
+
+```
+\ 
+\ 
+Now we can plot the cross validation MSE against the number of components to determine the optimal number of components to have in our model.
+\ 
+\ 
+```{r}
+# plot cross validation mse against the number of components 
+
+validationplot(pcr_fit, val.type = "MSEP", ylab = "Cross-Validation MSE")
+
+
+```
+\ 
+\ 
+From our validation plot we see that our optimal principal component regression model includes 8 components which is the same as our ordinary least squares model.
+\ 
+\ 
+```{r}
+# optimal principal component regression model
+
+# coefficients of optimal model
+pcr_fit$coefficients[, , 8]
+
+# number of components used in optimal model
+pcr_fit$ncomp
+
+```
+
+\ 
+\ 
+Now we fit a model to the training data using Partial Least Squares Regression and using 10 fold cross-validation to find an optimal model.
+\ 
+\ 
+```{r}
+# partial least squares regression
+set.seed(1)
+
+plsr_fit <- plsr(training$lpsa ~ ., data = stand_train_pred, scale = FALSE, validation = "CV")
+
+summary(plsr_fit)
+
+
+```
+\ 
+\ 
+now we can plot the standardized coefficients against the number of components and plot the Cross validation MSE against the number of components
+\ 
+\ 
+```{r}
+# plot of profile of coefficients
+
+#matrix of coefficients 
+
+plsr_coef_matrix <- matrix(plsr_fit$coefficients, ncol = 8, nrow = 8)
+
+rownames(plsr_coef_matrix) <- colnames(stand_train_pred)
+
+plsr_coef_matrix <- t(plsr_coef_matrix)
+
+# time to plot similiar to pcr
+matplot(c(1,2,3,4,5,6,7,8), plsr_coef_matrix[,1:8], type = "s", lty = 1, col = c("red", "blue", "green", "purple", "yellow", "orange", "cyan", "pink"), xlab = "Number of Components", ylab = "Standardized Coefficients")
+
+legend(1,.75, colnames(plsr_coef_matrix), cex = .45 , lty=c(1,1), lwd=c(1,1), col=c("red", "blue", "green", "purple", "yellow", "orange", "cyan", "pink"))
+
+# now plot the MSE against the components
+validationplot(plsr_fit, val.type = "MSEP")
+
+```
+\ 
+\ 
+From looking at our plot and mainly observing our root mse from our summary of our partial least squares function we see that our cross validation rmse is the lowest when the model uses 6 components and therefore our optimal partial least squares model is the model that utilizes 6 components.
+\ 
+\ 
+```{r}
+# our optimal partial least squares model
+
+plsr_fit$coefficients[, , 6]
+
+```
+\ 
+\ 
+Above are the coefficients of our partial least squares optimal model that uses 6 components.
+\ 
+\ 
+\ 
+
+### Ridge Regression and Lasso
+
+\ 
+\ 
+Now we can fit a Ridge Regression model using cv.glmnet from package "glmnet".
+\ 
+\ 
+```{r}
+# fit a ridge regression model
+set.seed(1)
+
+# create standardized design matrix to run in glmnet
+
+stand_train_pred_mat <- as.matrix(stand_train_pred)
+
+# 10 fold cross validation to find best lambda 
+
+cv_rr <- cv.glmnet(stand_train_pred_mat, training$lpsa, alpha = 0)
+
+# lambda with smallest cross validation error
+
+rr_lamda_best <- cv_rr$lambda.min
+
+# fit the ridge regression model with the best lambda tuning parameter
+
+rr_fit <- glmnet(stand_train_pred_mat, training$lpsa, alpha = 0, lambda = rr_lamda_best)
+
+# plot of Cross Validation Mean squared error
+
+plot(cv_rr)
+
+# plot of profiles of coefficients using lambda and l1 norm
+
+plot(glmnet(stand_train_pred_mat, training$lpsa, alpha = 0), xvar = "lambda")
+
+plot(glmnet(stand_train_pred_mat, training$lpsa, alpha = 0))
+```
+\ 
+\ 
+Now the Lasso 
+\ 
+\ 
+```{r}
+# the Lasso 
+set.seed(1)
+# find the lambda with the best cv mse for a tuning parameter
+
+cv_lasso <- cv.glmnet(stand_train_pred_mat, training$lpsa, alpha = 1)
+
+# best tuning parameter
+
+lasso_lambda_best <- cv_lasso$lambda.min
+
+# fit the lasso model with best best tuning paramter
+
+lasso_fit <- glmnet(stand_train_pred_mat, training$lpsa, alpha = 1, lambda = lasso_lambda_best)
+
+# plot of cross validation mse
+
+plot(cv_lasso)
+
+# plot of the profile of coefficients # use without best lambda
+
+plot(glmnet(stand_train_pred_mat, training$lpsa, alpha = 1))
+
+```
+\ 
+\  
+Therefore our optimal Ridges Regression model with tuning paramter is
+\ 
+\ 
+```{r}
+#optimal ridge regression 
+
+coef(rr_fit)
+
+# best tuning parameter
+
+rr_lamda_best
+
+```
+\ 
+\ 
+Our optimal model for the Lasso with tuning paramter is
+\ 
+\ 
+```{r}
+# optimal lasso model
+
+coef(lasso_fit)
+
+# best tuning parameter
+
+lasso_lambda_best
+```
+\ 
+\ 
+\ 
+
+### Model Selection
+
+\ 
+\ 
+The final stage of the predictive modeling cycle consists of selecting the best model among the candidates obtained in the model assessment stages. That is, you should have six candidate models: OLS, best subset, PCR, PLSR, RR, and Lasso.\ 
+\ 
+The next step is to determine the best model using the test set. This means computing test MSE for each candidate model, and selecting the one with the smallest test MSE
+\ 
+\ 
+Use our test set to get predictions of lpsa and calculate the test mse. First find the test mse for our ordinary least squares model
+\ 
+\ 
+```{r}
+# compute test MSE for ols model
+
+# standardize the test data 
+stand_test <- as.data.frame(scale(test))
+
+# number of observations in the test data
+n <- dim(test)[1]
+
+# predicted response values
+lm_predicted <- predict(ols_fit, newdata = stand_test)
+
+# test mse
+lm_test_mse <- sum((test$lpsa - lm_predicted)^2) / n
+
+lm_test_mse
+
+```
+\ 
+\ 
+find the test mse for the subset regression model of 7 variables
+\ 
+\ 
+```{r}
+# compute test mse for subset regression model
+
+# prediction for our ols with 7 
+subset_predicted <- predict(lm(training$lpsa ~. -gleason, data = stand_train_pred), newdata = stand_test)
+
+# test mse
+
+subset_test_mse <- sum((test$lpsa - subset_predicted)^2) / n
+
+subset_test_mse
+
+```
+\ 
+\ 
+test mse for the principal component regression 
+\ 
+\ 
+```{r}
+# pcr test mse
+
+pcr_predicted <- predict(pcr_fit, newdata = stand_test, ncomp = 8)
+
+# test mse
+
+pcr_test_mse <- sum((test$lpsa - pcr_predicted)^2) / n
+
+pcr_test_mse
+
+```
+\ 
+\ 
+calculate the test mse for the partial least squares regression model
+\ 
+\ 
+```{r}
+# plsr test mse
+
+plsr_predicted <- predict(plsr_fit, newdata = stand_test, ncomp = 6 )
+
+# test mse
+
+plsr_test_mse <- mean((test$lpsa - plsr_predicted)^2)
+
+plsr_test_mse
+```
+\ 
+\ 
+Calculate the test mse for the ridge regression model
+\ 
+\ 
+```{r}
+# ridge regression test mse
+
+rr_predicted <- predict(rr_fit, newx = as.matrix(stand_test)[,-9], s = rr_lamda_best)
+
+# test mse
+
+rr_test_mse <- mean((test$lpsa - rr_predicted)^2)
+
+rr_test_mse
+
+```
+\ 
+\ 
+Calculate the test mse for the lasso model
+\ 
+\ 
+```{r}
+# test mse for lasso
+
+lasso_predicted <- predict(lasso_fit, s = lasso_lambda_best, newx = as.matrix(stand_test)[,-9])
+
+# test mse
+
+lasso_test_mse <- mean((test$lpsa - lasso_predicted)^2)
+
+lasso_test_mse
+
+```
+\ 
+\ 
+```{r echo = FALSE, results = "asis"}
+# create a table
+
+# putting together columns to put in a nice table
+ols_col <- append(coef(ols_fit), lm_test_mse)
+sub_col <- append(coef(subset_reg, 7), subset_test_mse)
+sub_col <- append(sub_col, 0, after = 7)
+
+rr_col <- append(as.vector(coef(rr_fit)), rr_test_mse)
+las_col <- append(as.vector(coef(lasso_fit)), lasso_test_mse)
+
+pcr_col <- append(0, coef(pcr_fit, 8))
+plsr_col <- append(0, coef(plsr_fit, 6))
+
+pcr_col <- append(pcr_col, pcr_test_mse)
+plsr_col <- append(plsr_col, plsr_test_mse)
+
+my_table <- cbind(ols_col, sub_col, rr_col, las_col, pcr_col, plsr_col)
+
+rownames(my_table) <- c("Intercept", "lcavol", "lweight", "age", "lbph", "svi", "lcp", "gleason", "pgg45", "test mse")
+
+colnames(my_table) <- c("LS", "Best Subset", "Ridge", "Lasso", "PCR", "PLSR")
+
+# i dont have an intercept for PCR or PLSR
+
+kable(round(my_table, digits = 4))
+
+```
+
+
+
+

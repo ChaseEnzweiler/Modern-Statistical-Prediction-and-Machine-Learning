@@ -1,0 +1,346 @@
+---
+title: "PCA"
+author: "Chase Enzweiler"
+date: "9/14/2017"
+output: html_document
+lab_section: monday 9 - 11
+---
+
+## Exploratory Phase
+
+From looking at various scatter plots of the variables of the monthly temperatures we notice a strong positive correlation between neighboring months and weaker positve correlations between months of different seasons.
+```{r}
+# pairs plot
+temperature <- read.csv("~/Desktop/stat 154/temperature.csv")
+pairs(temperature[,2:13])
+```
+\
+By looking at the pairs plot of the montly temperatures we confirm that neighboring months have very strong positive correlations while we also notice that all of our variables have positive correlation with all the other monthly temperatures.\
+\
+We can also use a stars plot to observe how the individual city monthly temperatures relate to other cities
+
+```{r}
+# stars plot
+row_character_vect <- as.matrix(temperature[,1])
+row_character_vect <- as.vector(row_character_vect)
+
+stars(temperature[, 2:13], labels = row_character_vect, key.loc = c(-2,12), flip.labels = FALSE)
+
+
+```
+\
+Notice that cities such as Athens, Seville, and Barcelona have some of the warmest temperatures year round, while cities like Elsinki, Oslo, and St. Petersburg ahve some of the lowest. Also notice interesting symmetry between St. Petersburg and Rekjavic where Rekjavic has the coldest summer months but not the coldest winter months, while St.Petersburg is the opposite. 
+\
+Also looking at our monthly temperature variables, some variables have data that is skewed. 
+
+```{r}
+# summary of month temperatures
+summary(temperature$January)
+
+summary(temperature$March)
+
+
+```
+\
+From these statistics the month of january has data that is right skewed. Also March is the month that has data closest to being normally distributed.
+
+```{r}
+# boxplot
+boxplot(temperature[,2:13])
+
+# boxplot of standardized data
+
+boxplot(scale(as.matrix(temperature[2:13])))
+
+```
+\
+From these boxplots we see that many of the variables hae data that is slightly skewed right. We also notice that March is not normally distributed and is the only month with a slight right skew.
+\
+\
+Also looking at the variance of the temperatures of each month, we notice that January and February have the highest variances. The variances decrease month by month until its lowest in May then increases again.
+```{r}
+# variances
+var(temperature$January)
+var(temperature$February)
+
+var(temperature$May)
+
+```
+\
+"Explain to the reader why they need to know these things"
+
+## 1.) Calculation of PCA Outputs
+\
+Our active individuals are the Capitals of each of their respective countries and are the first 23 columns of our data and our active variables are the 12 monthly temperatures. We also want to standardize our data to have mean zero and standard deviation one.
+
+```{r}
+# data of active individuals and variables
+
+active_temp <- as.matrix(temperature[1:23, 2:13])
+row.names(active_temp) <- row_character_vect[1:23]
+
+# standardized active data
+
+s_active_temp <- scale(active_temp, center = TRUE, scale = TRUE)
+
+```
+\
+a.) Obtain the loadings and store them in a matrix, include row and column names. Display the first four loadings
+
+```{r}
+n <- dim(s_active_temp)[1]
+p <- dim(s_active_temp)[2]
+
+# calculate the sample correlation matrix
+
+R <- (1/(n-1)) * t(s_active_temp) %*% s_active_temp
+
+decomp_R <- eigen(R)
+
+# matrix of eigenvectors(loadings)
+V <- decomp_R$vectors
+
+colnames(V) <- paste("v", 1:12, sep = "")
+rownames(V) <- colnames(active_temp)
+V[,1:4]
+# has dimnsion p x r = 12 x 12
+
+# note need to name rows dont know what to name them
+
+
+```
+\
+b. Obtain the principal components and store them in a matrix, include row and column names. Display the first four PCs
+
+```{r}
+# calculate principal components (scores) matrix
+# has dim nxr = ind x rank
+Z <- s_active_temp %*% V
+
+colnames(Z) <- paste("PC", 1:12)
+
+Z[,1:4]
+
+```
+\
+c. Obtain the eigenvalues and store them in a vector. Display the entire vector, and compute their sum.
+
+```{r}
+e_value_vect <- decomp_R$values
+
+e_value_vect
+
+sum(e_value_vect)
+
+```
+\
+
+
+## 2.) Choosing the number of dimensions to retain/examine
+\
+
+\
+a.) Make a summary table of the eigenvalues: eigenvalue in the first column (each eigenvalue represents the variance captured by each component); percentage of variance in the second column; and cumulative percentage in the third column. Comment on the table.
+
+```{r}
+# proportion of explained inertia (percentage)
+proportion <- (e_value_vect / p) * 100
+
+#cumulative proportion of explained inertia
+cum_prop <- c(proportion[1])
+
+for(i in 2:12){
+  cum_prop <- append(cum_prop, sum(proportion[1:i]))
+}
+
+# summary table of eigen values
+eigen_sum_tab <- cbind(e_value_vect, proportion, cum_prop)
+
+rownames(eigen_sum_tab) <- paste("comp", 1:12)
+
+eigen_sum_tab <- as.table(eigen_sum_tab)
+
+eigen_sum_tab
+```
+\
+we see from this table that the first principal component explains about 82 percent of the variance, or inertia, and the second principal component explains about 15 percent. Cumulatively with our first two principal components about 98 percent of the total variance is explained. the proportion of variance explained for the next principal components are much smaller percentages and this is a good indicator that we should use our first two principal components. \
+\
+b.) Create a scree-plot (with axis labels) of the eigenvalues. What do you see? How do you read/interpret this chart?
+
+```{r}
+# create a scree-plot from scratch
+
+plot(1:12, e_value_vect, ylab = "Eigenvalues", type = "b", xlab = "Number of Principal Components", main = "Scree-Plot")
+
+```
+\
+This scree-plot plots the values of the eigenvalues against the number of principal components that we have. Our eigenvalues represent the variance of each of our 12 principle components. In order to reduce our amount of dimensions while maintaing a large portion of our variance we look for an elbow in the graph where the curve levels off or follow kaiser's rule. looking for an elbow we see the cuve leveling off after our 2nd principal component therefore we determine our elbow is at the 2nd component and we should keep the first two components.
+\
+c. If you had to choose a number of dimensions (i.e. a number of PCs), how many would you choose and why?
+\
+I would choose 2 dimensions which would be the first two principal components. Doing this reduces our dimensions from 12 which is what we are striving for in PCA and still has a large proportion of variance explained at a total of around 98 percent. We noticed an elbow at the second component from our scree-plot and adding one more dimension is not worth only the 1 percent more of the variance that component will give us.
+
+## 3.) Studying the Cloud of Individuals
+\
+A.) Create a scatter plot of the cities on the 1st and 2nd PCs.
+* In this plot, you should also project the supplementary cities.
+* Make sure to add a visual cue (e.g. size, font, shape) to differentiate between active
+and supplementary cities.
+* Color the cities according to the variable Area.
+* Comment on general patterns, as well as on particular patterns.
+
+```{r}
+# incorporate the supplementary cities
+# we have to mean center and scale the supplementary cities according to our standardization of active cities
+# we standardize using mean and sd of active cities
+
+active_means <- colMeans(active_temp)
+active_sd <- apply(active_temp, 2, sd)
+supp_temp <- as.matrix(temperature[24:35 , 2:13])
+row.names(supp_temp) <- row_character_vect[24:35]
+
+# standardized with respect to active cities 
+s_supp_temp <- t(t(supp_temp) - active_means)
+
+for(i in 1:12){
+  s_supp_temp[,i] <- s_supp_temp[,i] / active_sd[i]
+}
+
+library(ggplot2)
+# supplemental projections
+Z_s <- s_supp_temp %*% V
+
+Z_df <- as.data.frame(Z)
+Z_df$Area <- temperature[1:23, 18]
+
+
+
+Z_s_df <- as.data.frame(Z_s)
+Z_s_df$Area <- temperature[24:35, 18]
+
+#added
+colnames(Z_s_df) <- colnames(Z_df)
+
+ggplot(data = Z_df, aes(x = `PC 1`, y = `PC 2`, group = Area)) + geom_point(aes(color = Area)) + geom_point(data = Z_s_df, aes(x = Z_s_df$`PC 1`, y = Z_s_df$`PC 2`, color = Area), shape = 3) 
+
+
+ggplot(data = rbind(Z_df, Z_s_df), aes(x = `PC 1`, y = `PC 2`, group = Area)) + geom_point(data = Z_df, aes(color = Area)) + geom_point(data = Z_s_df, aes(x = Z_s_df$`PC 1`, y = Z_s_df$`PC 2`, color = Area), shape = 3) + geom_text(aes(label = rownames(rbind(Z_df, Z_s_df))), hjust = 0, vjust = 0)
+
+```
+\
+In this plot our active cities are represented as circular dots and our supplementary cities are represented as crosses(+). We see the general grouping by the Area of the cities with the Eastern cities grouping in the top right corner while the Northern cities are grouped far from the southern cities. We see one blue southern city Sarajevo closer to the groupings of the western and eastern cities than the southern cities.
+\
+B.) Compute the quality of individuals representation, that is, the squared cosines. Store the squared cosines in a matrix or data frame, include row and column names. Display the first four columns. What cities are best represented on the first two PCs? What cities have the worst representation on the first two PCs?
+
+```{r}
+# we want matrix of Zik^2 / d^2(xi,g)
+# the centroid of centered data is the origin
+#since the centroid is zero the euclidean squared distance we just need to square the observations
+
+dist2centroid <- apply(s_active_temp, 1, function(x) sum(x*x)) 
+
+cos2_matrix <- sweep(Z^2, 1, dist2centroid, FUN = "/")
+
+cos2_matrix[,1:4]
+
+
+```
+\
+The cities Rome, Athens, and Helsinki are best represented on the first principal component, while Dublin, london, and Amsterdam are best represented on the second principal component. 
+\
+\
+C.) Compute the contributions of the individuals to each extracted PC. Store the individuals contributions in a matrix or data frmae, include row and column names.
+Display the first four columns. Are there any influential cities on the first two PCs?
+
+```{r}
+# ctr(i,k) = (mi * Zik^2)/lamda k 
+# percentage of inertia explained by individual i on component k
+
+ctr <- (1 / (n - 1)) * Z^2
+
+ctr <- t(t(ctr) / e_value_vect) * 100
+
+ctr[,1:4]
+
+
+```
+\
+influential cities to the first PC are Athens, Lisbon, and Rome which account for about 25%, 13%, and 12% of the explained intertia or variance respectively. Influential cities to the second PC are Kiev with 9% explained variance and Budapest with about 7% of the explained variance of the principal component.
+\
+
+```{r}
+# plot the contributions
+ctr_df <- data.frame(ctr) 
+ctr_df$city <- 1:nrow(ctr_df) 
+ctr_df$zeros <- rep(0, nrow(ctr_df))
+
+ggplot(data = ctr_df, aes(x = city, y = PC.1)) + geom_point() + geom_segment(aes(x = city, xend = city, y = zeros, yend = PC.1)) + scale_x_discrete(limit = rownames(ctr_df)) +
+theme(axis.text.x = element_text(angle = 90, hjust = 1)) + ggtitle("Contributions of individuals to PC1")
+
+ggplot(data = ctr_df, aes(x = city, y = PC.2)) + geom_point() + geom_segment(aes(x = city, xend = city, y = zeros, yend = PC.2)) + scale_x_discrete(limit = rownames(ctr_df)) +
+theme(axis.text.x = element_text(angle = 90, hjust = 1)) + ggtitle("Contributions of individuals to PC2")
+
+```
+
+
+## 4.) Studying the cloud of Variables
+
+
+\
+\
+a. Calculate the correlation of all quantitative variables (active and supplementary) with the principal components. Store the correlations in a matrix or data frame, include row and column names. Display the first four columns.
+\
+```{r}
+# correlation matrix of variables with PC's
+#standardized supplementary variables
+supp_var <- temperature[1:23,14:17]
+
+stand_supp_var <- scale(supp_var)
+
+# I am going to include only the active individuals
+
+# matrix of both active and supplementary var
+s_both_temp <- cbind(s_active_temp, stand_supp_var)
+
+
+var_pc_corr <- cor(s_both_temp, Z)
+
+var_pc_corr[,1:4]
+
+```
+\
+b. Make a Circle of Correlations plot between the PCs and all the quantitative variables
+* For visualization purposes, include the circumference of a circle of radius one. 
+* Represent each variable in the plot as an arrow.
+* Use color to distinguish between active and supplementary variables.
+* Also include names of variables.
+
+```{r}
+# circle of correlations
+
+var_pc_corr <- as.data.frame(var_pc_corr)
+
+radians <- seq(0, 2*pi, length = 100)
+circle_frame <- data.frame(x = sin(radians), y = cos(radians))
+
+ggplot(data = var_pc_corr, aes(`PC 1`, `PC 2`)) + geom_segment(data = var_pc_corr, aes(x = 0, y = 0, xend = `PC 1`, yend = `PC 2`), arrow = arrow(length = unit(0.2, "cm"))) + geom_polygon(aes(x,y), data = circle_frame, color = "black", fill = NA)  + 
+  geom_text(data = var_pc_corr[1:12,], label = rownames(var_pc_corr[1:12,])) + geom_text(data = var_pc_corr[13:16,], label = rownames(var_pc_corr[13:16,]), color = "green")
+
+ggplot(data = var_pc_corr, aes(`PC 1`, `PC 2`)) + geom_segment(data = var_pc_corr, aes(x = 0, y = 0, xend = `PC 1`, yend = `PC 2`), arrow = arrow(length = unit(0.2, "cm"))) + geom_polygon(aes(x,y), data = circle_frame, color = "black", fill = NA)
+```
+\
+In our graph the labels in black represent the active variables while the labels in green represent the supplementary variables.
+\
+c. Based on the above parts (a) and (b), how are the active and supplementary variables related to the components?
+\
+We notice that all our active variables are positively correlated with one another and are all well represented on the first principle component. We can summarize the first principal component as "average temperature annually" since we can see our annual arrow close to the first pc. The months September, October and April are more closely linked than the others to the first component and therefore they represent the best annual temperatures.Apart from the average annual temperature, another supplementary quantitative variable is linked to PC1: latitude. The correlation between latitude and the first PC is worth 0.9099106, which means that the cities that are further north (higher latitude) have a higher coordinate on the first component and are therefore the coldest cities.
+\
+\
+
+
+## 5.) Conclusions
+
+\
+\
+Temperatures can be summarized by the first two Principal Components: PC1 can be labeled “average annual temperature”, and PC2 “thermal amplitude”. We conclude that Southern European cities are characterized by high temperatures throughout the year, Western European cities are characterized by average temperatures throughout the year, Northern European cities are characterized by cold temperatures, especially during summer, Eastern European cities are characterized by cold temperatures, especially during winter.
+

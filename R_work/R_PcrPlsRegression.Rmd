@@ -1,0 +1,375 @@
+---
+title: "PcrPlsRegression"
+author: "Chase Enzweiler"
+date: "10/9/2017"
+output: html_document
+---
+
+# PCR & PLS Regression
+
+```{r}
+# load hitters data
+library("ISLR")
+library("pls")
+
+data_hitters <- Hitters
+
+# principal component regression
+
+pcr_fit <- pcr(Salary ~ ., data = data_hitters, scale = TRUE, validation = "none")
+names(pcr_fit)
+
+
+```
+
+## 1.) Start with PCA
+
+Remove observations from hitters that have missing values in salary
+
+```{r}
+# remove salary missing values
+
+data_hitters <- data_hitters[complete.cases(data_hitters[c("Salary")]),]
+
+```
+\ 
+use model.matrix() to create a design matrix based of the formula salary~.
+\ 
+```{r}
+# create the design matrix
+
+design_matrix <- model.matrix(Salary ~ ., data = data_hitters)
+
+```
+\ 
+remove the intercept column from design matrix
+\ 
+```{r}
+# remove the first column of ones
+
+design_matrix <- design_matrix[,-1]
+
+```
+\ 
+standardize the model matrix of responses to create X
+\ 
+```{r}
+# standardize the design matrix
+X <- scale(design_matrix)
+
+```
+\ 
+Use svd() to get singular value decomposition of $X = UDV^T$
+\ 
+```{r}
+# singular decomposition
+
+decomp <- svd(X)
+
+```
+\ 
+compute the principal components Z from the from the standardized X and the eigenvectors V
+\ 
+```{r}
+# principal components
+
+Z <- X %*% decomp$v
+
+```
+\ 
+Confirm that you pc's match the pcr_fit$scores
+\ 
+```{r}
+# check equivalence of both methods
+round(pcr_fit$scores, digits = 4) == round(Z, digits = 4)
+
+```
+\ 
+\ 
+
+## 2. PC Regression on the first component
+\ 
+\ 
+
+use the first component to compute regression y on $z_1$, so we obtain first pcr coefficient $b_1$ by $$b_1 = (z_1^T z_1)^{-1} z_1^T y$$ 
+\ 
+then compute predicted values y_hat = $b_1z_1$
+\ 
+compare your fitted values against the fitted values from pcr which is pcr_fit$fitted.values[, , 1] which is the fitted response using PC1 provided by pcr
+\ 
+\ 
+```{r}
+# response vector
+Y <- data_hitters$Salary
+
+# first pcr coefficient
+b_1 <- solve(t(Z[,1]) %*% Z[,1]) %*% t(Z[,1]) %*% Y
+
+# pcr fitted value for component 1
+
+y_hat_comp1 <- b_1 * Z[,1]
+
+# check with pcr fitted values 
+
+round(y_hat_comp1 + mean(Y), digits = 4) == round(pcr_fit$fitted.values[, , 1], digits = 4)
+
+
+```
+\ 
+
+\ 
+
+## 3.) PC Regression on all PC's
+
+\ 
+\ 
+
+Compute the vector of PCR Coefficients $b_{pcr}$ by regressing Y on all PC's Z $$b_{pcr} = (Z^T Z)^{-1} Z^T Y$$
+
+```{r}
+# vector of pcr coefficients
+
+b_pcr <- solve(t(Z) %*% Z) %*% t(Z) %*% Y
+
+
+```
+\ 
+compute the vector of predicted values y_hat using all PC's
+$$y_{hat} = Zb_{pcr}$$
+ \ 
+```{r}
+# vector of predicted values using all PC's
+
+y_hat_allpc <- Z %*% b_pcr
+ 
+```
+\ 
+compare computed fitted vaues with pcr, pcr_fit$fitted.values[, , 19]
+\ 
+```{r}
+# check that they are equal
+
+# changes with all PC's included, us all pc's up to 
+
+round(y_hat_allpc + mean(Y), digits = 4) == round(pcr_fit$fitted.values[, , 19], digits = 4)
+
+```
+
+\ 
+\ 
+
+## PCR coefficients in terms of predictor variables
+\ 
+\ 
+You can rewrite the regression of PC1 in terms of the response variables as: $ y_{hat} = X (b_1 v_1)$
+\ 
+where $v_1$ is the loading associated with the first PC aka the first column of V
+\ 
+also $b^{star}_1 = b_1 v_1$ is the vector of regression coefficients in terms of the predictors
+\ 
+\ 
+In general, the PC regression coefficients can be expressed in terms of the predictors as: $$b^{star}_k = V_k D^{-1}_k U^{T}_k Y$$
+
+Where the index k indicates matrices associated to the first k components
+\ 
+\ 
+```{r}
+# calculate b_1*
+
+b_1star <- b_1 * decomp$v[,1]
+
+# check that the vector matches coefficients from pcr
+
+round(b_1star, digits = 4) == round(pcr_fit$coefficients[, , 1], digits = 4)
+
+# now do the same for all possible sets of PC's and verify the coefficients against the output of pcr_fit$coefficients
+
+# list will hold my coefficient vectors for each PC
+star_coeff <- list()
+
+# inverse of the diagonal singular values 
+D_inverse <- solve(diag(decomp$d))
+
+for (i in 1:19){
+  
+  star_coeff[[paste0("b_star", i)]] <- decomp$v[,1:i] %*% as.matrix(D_inverse[1:i,1:i]) %*% t(decomp$u)[1:i,] %*% Y
+}
+
+# now check that our generated coeficient vectors match the ones from pcr_fit$coefficients. Going to check the first and last as well as a few in between 
+
+# coeficients up to 1st pc
+round(star_coeff$b_star1, digits = 4) == round(pcr_fit$coefficients[, , 1], digits = 4)
+
+# coefficient vector up to 5th pc
+round(star_coeff$b_star5, digits = 4) == round(pcr_fit$coefficients[, , 5], digits = 4)
+
+# coefficient vector up to 13th pc
+round(star_coeff$b_star13, digits = 4) == round(pcr_fit$coefficients[, , 13], digits = 4)
+
+# coefficient vector up to last pc
+round(star_coeff$b_star19, digits = 4) == round(pcr_fit$coefficients[, , 19], digits = 4)
+
+
+
+
+```
+\ 
+\ 
+
+## Partial Least Squares Regression
+
+\ 
+\ 
+
+```{r}
+# run plsr 
+# salary on our model matrix
+# make sure to standardize Y
+# because we are assuming X and Y are standardized
+
+
+Y <- scale(Y)
+
+plsr_fit <- plsr(Y ~ X)
+
+```
+
+
+Write the classic version of the PLSR algorithm
+
+```{r}
+library(Matrix)
+# classic plsr algorithm
+
+classic_plsr <- function(X, y){
+  
+  # performs partial least squares algorithm
+  
+  # [input] X standardized matrix of the predictors, 
+  # Y standardized response variable
+  
+  # [Output] matrix of components, matrix of weights,
+  # matrix of loadings, vector of coefficients, matrix of fitte values
+  
+  r <- rankMatrix(X)
+  
+  X_list <- list()
+  
+  y_list <- list()
+  
+  # loadings 
+  p_list <- list()
+  
+  # normalized weights
+  weights_list <- list()
+  
+  # coefficients 
+  b_list <- list()
+  
+  # components
+  Z_list <- list()
+  
+  # fitted values
+
+  fitted_list <- list()    
+ #=========================================================
+  # this first part is as the first i in for loop because 
+  # there is no indexing at zero
+     
+  w <- t(X) %*% y
+    
+  # normalize weight 
+    
+  weights_list[[1]] <- w / sqrt(sum(w^2))
+  
+  # compute Z 
+  
+  Z_list[[1]] <- (X %*% weights_list[[1]]) / as.numeric(t(weights_list[[1]]) %*% weights_list[[1]])
+  
+  # compute loadings
+  
+  p_list[[1]] <- (t(X) %*% Z_list[[1]]) / as.numeric(t(Z_list[[1]]) %*% Z_list[[1]])
+  
+  X_list[[1]] <- X - Z_list[[1]] %*% t(p_list[[1]])
+  
+  b_list[[1]] <- (t(y) %*% Z_list[[1]]) / as.numeric(t(Z_list[[1]]) %*% Z_list[[1]])
+  
+  y_list[[1]] <- y - as.numeric(b_list[[1]]) * Z_list[[1]]
+  
+  fitted_list[[1]] <- as.numeric(b_list[[1]]) * Z_list[[1]]
+ 
+  
+  #============================================= 
+  # loop to calculate the rest for each PC
+  for (i in 2:r){
+    
+    # calculate the weights/ direction
+    # this is proportional to corr between X_j and y
+    
+    w <- t(X_list[[i - 1]]) %*% y_list[[i - 1]]
+    
+    weights_list[[i]] <- w / sqrt(sum(w^2))
+    
+    # calculate and store the component
+    
+    Z_list[[i]] <- (X_list[[i - 1]] %*% weights_list[[i]]) / as.numeric(t(weights_list[[i]]) %*% weights_list[[i]])
+    
+    # calculate the loadings and store
+    
+    p_list[[i]] <- (t(X_list[[i - 1]]) %*% Z_list[[i]]) / as.numeric(t(Z_list[[i]]) %*% Z_list[[i]])
+    
+    # recalculate and store X 
+    
+    X_list[[i]] <- X_list[[i - 1]] - (Z_list[[i]] %*% t(p_list[[i]]))
+    
+    # calculate coefficients
+    
+    b_list[[i]] <- (t(y_list[[i - 1]]) %*% Z_list[[i]]) / as.numeric(t(Z_list[[i]]) %*% Z_list[[i]])
+    
+    # recalculate response
+    
+    y_list[[i]] <- y_list[[i - 1]] - as.numeric(b_list[[i]]) * Z_list[[i]]
+    
+    # fitted values
+    
+    fitted_list[[i]] <- as.numeric(b_list[[i]]) * Z_list[[i]]
+                                  
+  }
+  
+  return(list(components = do.call(cbind, Z_list), weights = do.call(cbind, weights_list), loadings = do.call(cbind, p_list),
+         coefficients = do.call(c, b_list), fitted = do.call(cbind, fitted_list)))
+  }
+
+```
+\ 
+\ 
+Now check our first PLS component with the built in function plsr
+\ 
+\ 
+```{r}
+# my plsr algorithm
+
+my_plsr <- classic_plsr(X, Y)
+
+# check the z1 components scores
+
+round(my_plsr$components[,1], digits = 4) == round(plsr_fit$scores[,1], digits = 4)
+
+# check the weights
+
+round(my_plsr$weights[,1], digits = 4) == round(plsr_fit$loading.weights[,1], digits = 4)
+
+# check the loadings 
+
+round(my_plsr$loadings[,1], digits = 4) == round(plsr_fit$loadings[,1], digits = 4)
+
+# check the fitted values
+round(my_plsr$fitted[,1], digits = 4) == round(plsr_fit$fitted.values[, ,1], digits = 4)
+
+
+
+```
+
+
+
+

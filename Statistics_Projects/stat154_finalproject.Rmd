@@ -1,0 +1,791 @@
+---
+title: "stat154_finalproject"
+author: "Chase Enzweiler"
+date: "11/14/2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# Final Project Stat 154 
+\ 
+\ 
+The goal of this project is to predict whether a person makes more than 50k a year.
+
+\ 
+\ 
+## Preprocessing and Exploratory Data Analysis
+
+\ 
+\ 
+First we want to load in our needed packages
+\ 
+```{r}
+library(ggplot2)
+library(rpart)
+library(ROCR)
+library(randomForest)
+library(caret)
+```
+\ 
+\ 
+Now we load in our adult census data.
+\ 
+```{r}
+# load in our training data
+adult_data <- read.csv("~/Desktop/R_projects/Stat154_finalproject/adult.data.csv", header = FALSE)
+
+# load in our test data 
+adult_test <- read.csv("~/Desktop/R_projects/Stat154_finalproject/adult.test.csv", header = FALSE)
+
+```
+\ 
+\ 
+We add column names to our data frames.
+\ 
+```{r}
+# name the columns 
+colnames(adult_data) <- c("age", "workclass", "fnlwgt", "education", "education.num", "marital.status", "occupation", "relationship", "race", "sex", "capital.gain", "capital.loss", "hours.per.week", "native.country", "income")
+
+colnames(adult_test) <- c("age", "workclass", "fnlwgt", "education", "education.num", "marital.status", "occupation", "relationship", "race", "sex", "capital.gain", "capital.loss", "hours.per.week", "native.country", "income")
+
+```
+\ 
+\ 
+There are missing values in the data currently represented by " ?". Data with missing values will be removed from both the training and the test data.
+\ 
+```{r}
+# set missing values to NA 
+adult_data[adult_data == " ?"] <- NA
+
+adult_test[adult_test == " ?"] <- NA
+
+# remove observations with missing values 
+
+adult_data <- na.omit(adult_data)
+
+adult_test <- na.omit(adult_test)
+
+# drop the unused level of " ?" from factor variables
+
+adult_data <- droplevels(adult_data)
+
+adult_test <- droplevels(adult_test)
+
+```
+
+\ 
+\ 
+Other issues we run into with our training and test data is that our response variable income has inconsistent spelling between our two datasets. In our training dataset income is represented by " <=50K" or " >50K" and in the testing dataset it is represented by " <=50K." and " >50K.". Therefore we will change the class names in our testing data set to match our training dataset.
+\ 
+```{r}
+# change " <=50K." to " <=50K" etc.
+adult_test$income <- ifelse(adult_test$income == " >50K.", " >50K", " <=50K")
+
+```
+\ 
+
+Thankfully, classification tree based methods don't need too much data preprocessing. Classification trees should be consistent regarding scaling and can handle categorical variables without having to dummy code them. However, we notice that our predictor education-num and education are the same just one as an integer and one as a factor variable. Therefore we will drop the education variable from our data set and keep education-num. 
+\ 
+```{r}
+# drop education and create a copy of the data we will use
+train <- adult_data[,-4]
+test <- adult_test[,-4]
+
+```
+
+\ 
+\ 
+We can take a look at the structure of our predictors and a summary of our predictors
+\ 
+```{r}
+str(train)
+
+summary(train)
+```
+\ 
+\ 
+From the summarized data we can see that our sample predominantly makes less than 50k. This tells us that our data is imbalanced as there are far more observations with income less than or equal to 50K, 22654,than there are observations that make greater than 50K ,only 7508. This could prove to be a problem when we fit some of our classifiers as our classifiers might become bias towards the class " <=50K". However for this project we are only concerned with the overall accuracy of our classifiers and not the accuracy for each particular class
+\ 
+\ 
+Now we can take a quick look at the relationships between some of our predictors and our response
+\ 
+```{r}
+# check relationship between sex and income
+ggplot(train, aes(income, fill = sex)) + geom_bar()
+
+```
+
+\ 
+\ 
+We see that overall from predictor sex the level "Male" is more likely to make more than 50k than "Female".
+\ 
+\ 
+
+We can also take a look at the densities of a few predictors with respect to the income class.
+\ 
+```{r}
+# age density
+ggplot(train, aes(x = age, fill = income)) + geom_density(alpha = .5)
+
+ggplot(train, aes(x = fnlwgt, fill = income)) + geom_density(alpha = .5)
+
+
+```
+\ 
+
+From looking at the densities we can see that younger people are more likely to make less than 50k than older people and the distribution of age with in come less than 50k is skewed right. Also we see that the densitites of fnlwgt for each income class are very similiar and fnlwgt may not be a strong predictor of a persons income. 
+\ 
+\ 
+
+We can also check out the correlations among numerical predictors.
+\ 
+```{r}
+# correlation matrix
+cor(train[,c(1, 3, 4, 10,11,12)])
+
+
+```
+
+\ 
+\ 
+We see that there is little correlation among our numerical predictors.
+
+\ 
+\ 
+\ 
+
+## Building a Classification Tree
+
+\ 
+\ 
+
+Using the R package "rpart" we will fit a classification tree.
+
+\ 
+```{r}
+# fit a classification tree to the training data, grown to maximmum depth 
+set.seed(1)
+
+class_tree <- rpart(income ~ ., data = train, method = "class", control = rpart.control(minsplit = 20, cp = 0))
+
+```
+\ 
+\ 
+Since we grew our classification tree to its maximum depth, we expect that our tree will be extremely large. However, we can still plot and view our tree although we will leave out the labels so that the tree is still visible.
+\ 
+```{r}
+# full classification tree
+plot(class_tree)
+```
+
+
+\ 
+\ 
+Now that we have grown a large classification tree we have to prune the tree to avoid overfitting our data. We then look for a subtree with the lowest cross-validation error and find the cost complexity parameter that is associated with the smallest cross-validation error. 
+\ 
+```{r}
+# can plot the relative error against the cp to visualize amount of splits in best subtree
+plotcp(class_tree)
+
+# table containing cross validation errors and cp 
+printcp(class_tree)
+
+# obtain the optimal cost complexity parameter
+
+# returns named int, so use as.integer() to get just int
+cv_index <- as.integer(which.min(class_tree$cptable[,"xerror"]))
+
+class_best_cp <- class_tree$cptable[20,"CP"]
+
+# optimal cp 
+class_best_cp
+```
+
+
+\ 
+\ 
+Using our optimal cost complexity parameter, we can now prune our tree to get the lowest test error rate that we estimated using the cross validation error.
+\ 
+```{r}
+# prune the tree
+class_tree_prune <- prune(class_tree, class_best_cp)
+```
+
+\ 
+\ 
+Variable importance is measured by the sum of goodness of split. Since our tree was grown using the Gini index to determine the goodness of split, the importance of each of our variables is then determined by the sum of the amount that the Gini index is decreased by splits over that variable.
+
+\ 
+```{r}
+# variable importance statistic output
+class_tree_prune$variable.importance
+```
+
+
+\ 
+\ 
+Our 5 most important variables are therefore relationship, marital.status, education.num, capital.gain, and occupation.
+\ 
+\ 
+We can then calculate the training accuracy rate of our model.
+
+\ 
+```{r}
+# predict the pruned tree (class_tree_prune) on the training data
+set.seed(1)
+train_tree_pred <- predict(class_tree_prune, newdata = train)
+
+head(train_tree_pred)
+
+# we want 1 for >50k and 0 for <= 50k
+
+# we select the second column here corresponding to probabilities that income is >50k
+
+train_tree_pred <- train_tree_pred[,2]
+
+# create a logical vector that is true when the estimated probability of income >50k is > .5
+
+train_tree_pred_tf <- train_tree_pred > .5
+
+# original observations class_tree_prune$y are classified as 1 for <= 50k and 2 for >50k so we subtract 1 to get 0's and 1's. 
+
+training_acc_tree_prune <- mean(train_tree_pred_tf == (class_tree_prune$y - 1))
+
+# Training Accuracy for pruned classification tree
+
+training_acc_tree_prune
+
+```
+
+\ 
+\ 
+The training accuracy of our pruned classification tree(class_tree_prune) is about 87 percent. We can also display the ROC curve for our classification tree which will show the true positive and false positive rates over all possible cutoffs/thresholds.
+\ 
+```{r}
+# ROCR prediction object
+class_prediction <- prediction(train_tree_pred, class_tree_prune$y)
+
+# plot roc curve 
+
+class_roc <- performance(class_prediction, measure = "tpr", x.measure = "fpr")
+
+plot(class_roc, main = "ROC Curve for Classification Tree")
+abline(a = 0, b = 1, col = "green")
+
+# report the area under curve
+
+class_auc <- performance(class_prediction, measure = "auc")
+
+class_auc@y.values
+
+```
+
+
+\ 
+\ 
+Our ROC curve for our classification tree shows that our tree performs much better on our data than a random classifier would. A random classifier given by the green line in our ROC curve gives an area under curve (AUC) of .5 where our classification tree performs much better with area under the curve of AUC = .8929411.
+
+\ 
+\ 
+One note I would like to make however is that we have a good training accuracy rate at around 87 percent but our classification tree is more accurate classifying observations that income is <= 50K rather than >50K. For example we can look at the confusion matrix where the left side of the table is predicted class with 0 equal to <= 50K and 1 equal to >50K.
+```{r}
+# confusion matrix 
+predictions_of_class <- ifelse(train_tree_pred_tf, " >50K", " <=50K")
+
+table(predictions_of_class, ifelse(class_tree_prune$y-1 == 0, " <=50K", " >50K"))
+```
+
+
+\ 
+Therefore to get better predictions of >50K we can change our cutoff/threshold values, although this will affect our overall training accuracy. We could also, as mentioned earlier, train this classifier on set that is less imbalanced than our current training data set. However, we get a good enough training accuracy rate for our classification tree that we are ok with more error classifying our " >50K" class to have a lower overall training accuracy rate.
+
+\ 
+\ 
+
+
+## Building a Bagged Tree
+
+\ 
+\ 
+
+Using the package randomForest we can fit a bagged tree to our training data. The bagged tree is made by fitting trees on bootstrapped training sets. The parameter to choose is the number of trees we want constructed (ntree), but since the bagged tree will not overfit the data as the parameter ntree grows we will choose a number of trees (ntree) that is not to computationally expensive.
+\ 
+```{r}
+# fit a bagged tree 
+set.seed(1)
+bagged_tree <- randomForest(income ~ ., data = train, ntree = 40, mtry = 13, importance = TRUE)
+
+bagged_tree
+```
+
+```{r}
+# plot the error with respect to the number of trees
+plot(bagged_tree)
+
+```
+
+
+\ 
+The plot above shows the error rates for both classes with green being the error rate for class >50K and the red being the error rate for class <= 50K. The black solid line represents the out-of-bag error estimation. We see that the out-of-bag error levels off at about 40 trees, so we find that 40 trees is an acceptable amount for this model.
+\ 
+\ 
+We can now check which variables are the most important
+\ 
+```{r}
+# variable importance 
+varImpPlot(bagged_tree, main = "Variable Importance Plot")
+
+bagged_tree$importance
+```
+
+
+\ 
+\ 
+Paying attention to the mean decrease in Gini index for each variable in our variable importance plot we see that our most important variables are relationship, fnlwgt, education.num, age, capital.gain, hours.per.week, and occupation with mean decrease of Gini 2363.81505, 2181.99691, 1386.50982, 1374.78728, 1174.75966, 789.07421, and 760.47490 respectively.
+
+\ 
+\ 
+Now to calculate the training accuracy rate.
+\ 
+```{r}
+# generate predictions on the training set
+set.seed(1)
+bagged_train_pred <- predict(bagged_tree, newdata = train)
+
+# training accuracy
+training_acc_bagged <- bagged_train_pred == bagged_tree$y
+
+mean(training_acc_bagged)
+```
+
+\ 
+\ 
+The training accuracy rate of our bagged tree is about 86 percent which is very close to our training accuracy rate for our classification tree. The training accuracy of our bagged tree is around 1 percent less accurate than our classification tree. We will also display the ROC curve for our bagged tree.
+\ 
+```{r}
+# ROCR prediction object
+
+bagged_prediction <- prediction(bagged_tree$votes[,2], bagged_tree$y)
+
+# plot roc curve 
+
+bagged_roc <- performance(bagged_prediction, measure = "tpr", x.measure = "fpr")
+
+plot(bagged_roc, main = "ROC Curve for Bagged Tree")
+abline(a = 0, b = 1, col = "green")
+
+# report the area under curve
+
+bagged_auc <- performance(bagged_prediction, measure = "auc")
+
+bagged_auc@y.values
+
+```
+
+
+\ 
+\ 
+The ROC curve above was created using proportions from the votes of each of the trees in the bagged tree. Our area under curve(AUC) value is  good  and is much better than the "no information" classifier which is represented by the green line with AUC = .5. The AUC of our bagged tree is 0.8126158.
+
+\ 
+\ 
+Lastly just to get a better idea on how our bagged tree is performing on our training set we can take a look at the confusion matrix for our bagged tree on our training set.
+```{r}
+# confusion matrix
+bagged_tree_predictions <- bagged_train_pred
+table(bagged_tree_predictions, bagged_tree$y)
+```
+
+
+\ 
+Looking at the confusion matrix for our bagged tree on the training data set we see that our bagged tree performs extremely well correctly classifying observations that have income <=50K, but performs poorly trying to classify observations with income >50K. Some of this bias towards the class " <=50K" could be due to the fact that the bagged tree was trained on an imbalanced training set. However, we still get a good overall training accuracy at about 86 percent just around 1 percent worse compared to our classification tree.
+
+## Building a Random Forest
+
+\ 
+We can now use the R package randomForest to fit a random forest to our training data. Random forests are similiar to bagged trees except random forests decorrelate the bootstrapped trees by restricting the variables available to perform each split in each tree. Usually the amount of random variables selected is restricted to the square root of the total amount of variables, but here we will consider whichever restriction is optimal.
+\ 
+\ 
+To find the optimal restriction of randomly selected variables we can use the function tuneRF() from the randomForest package. tuneRF will search for the optimal amount of variables to choose from for each split of the random forest and provide the out-of-bag errors for each amount used.
+\ 
+```{r}
+# find optimal mtry parameter
+set.seed(1)
+tuneRF(train[,-14], train$income)
+
+```
+
+
+\ 
+\ 
+from our tuneRF results we see that our optimal amount of variables (mtry paramter in randomforest) is 2. Using mtry = 2 gives us the lowest out-of-bag error with .1756515.
+Therefore we will fit our random forest classifier with parameter mtry = 2.
+\ 
+\ 
+```{r}
+# fit our random forest classifier
+set.seed(1)
+random_forest <- randomForest(income ~ ., data = train, mtry = 2, ntree = 60, importance = TRUE)
+
+random_forest
+```
+
+\ 
+We fit our random forest with a total of 60 trees. We can then plot the error of our random forest to determine whether 60 trees is sufficient for our model.
+\ 
+```{r}
+# plot random forest oob error
+plot(random_forest)
+```
+
+
+\ 
+\ 
+We see that the solid black line representing the out-of-bag error rate remains level from about the 40 tree mark and therefore 60 trees will be sufficient for our random forest. We can now check which variables in our random forest are most important.
+
+\ 
+```{r}
+# variable importance measures
+random_forest$importance
+
+varImpPlot(random_forest)
+
+
+```
+
+
+\ 
+\ 
+We consider important variables to be those that have largest decrease in Gini index averaged across all trees. Therefore using the measure of mean decrease in Gini, our most important variables in our random forest are capital.gain, relationship, occupation, education.num, marital.status, and age each with mean decrease of Gini index of 1144.10785, 1086.72896, 974.86970, 854.73979, 837.99294, and 808.82208 respectively.
+
+\ 
+\ 
+Now we can calculate the training accuracy rate using our random forest classifier.
+\ 
+```{r}
+# training accuracy rate
+
+rf_pred <- predict(random_forest, newdata = train)
+
+mean(rf_pred == random_forest$y)
+
+```
+
+\ 
+\ 
+Our random forest has a training accuracy rate of about 82.75645 percent which is the lowest of all our classifiers. We can also display the ROC curve for our random forest.
+\ 
+```{r}
+# prediction object
+rf_prediction <- prediction(random_forest$votes[,2], random_forest$y)
+
+# plot roc curve 
+
+rf_roc <- performance(rf_prediction, measure = "tpr", x.measure = "fpr")
+
+plot(rf_roc, main = "ROC Curve for Random Forest")
+abline(a = 0, b = 1, col = "green")
+
+# report the area under curve
+
+rf_auc <- performance(rf_prediction, measure = "auc")
+
+rf_auc@y.values
+
+```
+
+
+\ 
+\ 
+Dispayling the Roc curve we see that our random forest performs much better than would a "no information" classifier represented by the green line. The area under the curve for our random forest is 0.8606042.
+\ 
+We can construct a confusion matrix that will give us an idea of how well our classifier classifies observations of a certain class. We see below that our random forest classifier trained on the training set (train) is near perfect classifying observations with income less than 50K and is bad at classifying observations who's true income is greater than 50K. 
+\ 
+```{r}
+# confusion matrix 
+random_forest_predictions <- rf_pred
+table(random_forest_predictions, random_forest$y)
+
+
+```
+
+
+\ 
+Looking at our random forest confusion matrix we see that maybe training our random forest on an imbalanced training data set caused our classifier to be bias towards the class " <=50K". We didn't care about having relatively high error rates for the class " >50K" before in our other classifiers because the decrease in error for our other class was good enough to offset our high errors and still gave us good training accuracy for our other two classifiers. However with our random forest, the high error rates for " >50K" are not being offset enough with low error rates for the other class and the training accuracy takes a big hit. The training accuracy for our random forest is 82.75976 which is lower than all our other classifiers. 
+
+\ 
+\ 
+
+A way we can combat our random forest's high bias towards the class " <=50K" is to train our random forest on a balanced training dataset and see if we can improve our training accuracy rate for our random forest.
+\ 
+\ 
+
+We will create a new training data set by keeping observations with income " >50K" and sampling from the remaining observations with income "<=50K" to create a new dataset that has equal amounts of observations with each income class.
+\ 
+```{r}
+# create new undersampled training set
+set.seed(1)
+
+less_index <- which(train$income == " <=50K")
+greater_index <- which(train$income == " >50K")
+
+# sample from the class with way more observations
+samp <- sample(less_index, size = length(greater_index))
+
+# the dataset
+undersampled <- train[append(samp, greater_index),]
+```
+
+\ 
+Now we can retrain a random forest on this new balanced training dataset. Similiar as above we search for an optimal amount of variables to try at each split.
+\ 
+
+```{r}
+# tune mtry for new balanced random forest
+set.seed(1)
+tuneRF(undersampled[,-14], undersampled$income)
+```
+
+
+\ 
+We get that the optimal number of variables to choose from at each split is 1. Therefore when we fit our random forest parameter mtry = 1.
+\ 
+```{r}
+# fit our new random forest classifier on the balanced data
+set.seed(1)
+balanced_random_forest <- randomForest(income ~ ., data = undersampled, mtry = 1, ntree = 250, importance = TRUE)
+
+plot(balanced_random_forest)
+```
+
+
+\ 
+\ 
+We fit our new random forest called balanced_random_forest with 250 trees and from looking at the above plot of the out-of-bag error(the black line), it seems the oob error seems to level after 200 trees, so our random forest of 250 trees will be sufficient. We can next check what variables are most important for our new random forest.
+\ 
+```{r}
+# important variables
+varImpPlot(balanced_random_forest)
+
+balanced_random_forest$importance
+
+```
+
+
+\ 
+We consider important variables to be those that have largest decrease in Gini index averaged across all trees. Therefore using the measure of mean decrease in Gini, our most important variables in our new random forest are relationship, marital.status, ocupation, education.num, age, and capital.gain with mean decreas in Gini 703.82267, 651.84948, 420.33837, 380.99798, 364.83827, and 337.92745 respectively. Next we can calculate the training accuracy on our full training data(train) that was used to fit our other random forest to see if our new random forest trained on balanced data performs better.
+\ 
+```{r}
+# calculate training accuracy rate on original unbalanced training set
+set.seed(1)
+balanced_random_forest_pred <- predict(balanced_random_forest, newdata = train)
+
+# can use random_forest$y because is y from data set train
+mean(balanced_random_forest_pred == random_forest$y)
+
+```
+
+
+\ 
+Our training accuracy rate for our new random forest trained on undersampled balanced training data is 86.12161 percent. Therefore our new random forest classifier(balanced_random_forest) performs better than our original random forest that was trained on the original training dataset(random_forest). Although our new random forest has a better training accuracy rate than the original random forest(random_forest), our new random forest still has a lower training accuracy rate than our bagged tree and our classification tree. Lastly we will plot the ROC curve for our new random classifier.
+\ 
+\ 
+```{r}
+# prediction object
+set.seed(1)
+balanced_prediction <- prediction(predict(balanced_random_forest, type = "vote", newdata = train)[,2], random_forest$y)
+
+# plot roc curve 
+
+bal_roc <- performance(balanced_prediction, measure = "tpr", x.measure = "fpr")
+
+plot(bal_roc, main = "ROC Curve for balanced_random_forest")
+abline(a = 0, b = 1, col = "green")
+
+# report the area under curve
+
+bal_auc <- performance(balanced_prediction, measure = "auc")
+
+bal_auc@y.values
+
+```
+
+
+\ 
+The area under the curve for our new random forest is AUC = 0..919952
+\ 
+\ 
+
+
+## Model Selection
+
+\ 
+Now we will validate our supervised classifier with the best training error on the test set. Our best classifier is our classification tree(class_tree_prune). However before we validate our classifier we have to fix our test set first because the variable native.country has 40 levels in our test set and 41 in our training set. This leads to errors when we try to predict on the test set so we will add the missing level "Holand-Netherlands" to the test set. 
+\ 
+```{r}
+# fix our test set to have 41 levels for variable native.country
+
+# we can first rbind both sets
+all_data <- rbind(train, test)
+
+# we can take out the training data and our test data should be left with 41 levels for native.country
+
+adjusted_test <- all_data[-seq(1,30162, 1),]
+```
+
+\ 
+Now we can use our classification tree to calculate the test accuracy rate.
+\ 
+
+```{r}
+# predict on test
+set.seed(1)
+# probabilities of greater than 50k
+class_test_pred <- predict(class_tree_prune, adjusted_test)[,2]
+
+# boolean of greater than 50K
+class_test_pred_char <- ifelse(class_test_pred > .5, " >50K", " <=50K")
+
+
+mean(adjusted_test$income == class_test_pred_char)
+
+
+```
+
+
+\ 
+Our classification tree has a test accuracy rate of 85.55777 percent. We can calculate the confusion matrix for our classification tree predicted on our test set.
+\ 
+```{r}
+# confusion matrix
+Predictions <- class_test_pred_char
+
+table(Predictions, adjusted_test$income)
+
+```
+
+
+\ 
+Using the positive event " >50K" we can calculate the true positive rate and the true negative rate.
+\ 
+```{r}
+# true positive rate tpr = tp/p
+tpr <- 2239 / (2239 + 1461)
+
+tpr
+
+# true negative rate = specificity, fpr = 1 - specificity = fp/n
+
+fpr <- 714 / (714 + 10646)
+
+#specificity
+1 - fpr
+
+```
+
+
+\ 
+The true positive rate/ sensitivity is 0.6051351 and the specificity/ 1 - false positive rate is 0.9371479.
+\ 
+\ 
+lastly we will plot the roc curves of all our classifiers on the testing data. First for our classification tree on the test data.
+\ 
+```{r}
+# classification tree roc curve
+set.seed(1)
+# ROCR prediction object
+class_test_prediction <- prediction(class_test_pred, adjusted_test$income)
+
+# plot roc curve 
+
+class_test_roc <- performance(class_test_prediction, measure = "tpr", x.measure = "fpr")
+
+plot(class_test_roc, main = "ROC Curve for Classification Tree on test data")
+abline(a = 0, b = 1, col = "green")
+
+# report the area under curve
+
+class_test_auc <- performance(class_test_prediction, measure = "auc")
+
+class_test_auc@y.values
+```
+
+
+\ 
+ROC curve for bagged tree on test data
+\ 
+```{r}
+# roc for bagged tree on test data
+set.seed(1)
+# ROCR prediction object
+
+bagged_test_prediction <- prediction(predict(bagged_tree, adjusted_test, type = "vote")[,2], adjusted_test$income)
+
+# plot roc curve 
+
+bagged_test_roc <- performance(bagged_test_prediction, measure = "tpr", x.measure = "fpr")
+
+plot(bagged_test_roc, main = "ROC Curve for Bagged Tree on test data")
+abline(a = 0, b = 1, col = "green")
+
+# report the area under curve
+
+bagged_test_auc <- performance(bagged_test_prediction, measure = "auc")
+
+bagged_test_auc@y.values
+
+
+```
+
+
+\ 
+ROC curve for our random forest classifier fit on the original training data.
+\ 
+
+```{r}
+# roc for random forest
+# prediction object
+set.seed(1)
+rf_test_prediction <- prediction(predict(random_forest, newdata = adjusted_test, type = "vote")[,2], adjusted_test$income)
+
+# plot roc curve 
+
+rf_test_roc <- performance(rf_test_prediction, measure = "tpr", x.measure = "fpr")
+
+plot(rf_test_roc, main = "ROC Curve for Random Forest on test data")
+abline(a = 0, b = 1, col = "green")
+
+# report the area under curve
+
+rf_test_auc <- performance(rf_test_prediction, measure = "auc")
+
+rf_test_auc@y.values
+
+
+```
+
+
+\ 
+ROC curve for the random forest fit on the undersampled balanced training set.
+\ 
+```{r}
+# roc curve for balanced random forest
+# prediction object
+set.seed(1)
+balanced_test_prediction <- prediction(predict(balanced_random_forest, type = "vote", newdata = adjusted_test)[,2], adjusted_test$income)
+
+# plot roc curve 
+
+bal_test_roc <- performance(balanced_test_prediction, measure = "tpr", x.measure = "fpr")
+
+plot(bal_test_roc, main = "ROC Curve for balanced_random_forest on test data")
+abline(a = 0, b = 1, col = "green")
+
+# report the area under curve
+
+bal_test_auc <- performance(balanced_test_prediction, measure = "auc")
+
+bal_test_auc@y.values
+
+```

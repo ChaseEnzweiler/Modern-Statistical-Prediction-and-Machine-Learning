@@ -1,0 +1,194 @@
+---
+title: "Matrix-Decompositions"
+author: "Chase Enzweiler"
+date: "9/11/2017"
+output: html_document
+---
+
+
+
+## SVD on Raw Data
+
+
+use svd() to compute the SVD of USArrests dataset in R
+```{r}
+svd_arrests <- svd(USArrests)
+```
+ take the output of svd() and create the matrices U, D, V
+```{r}
+U <- svd_arrests$u
+D <- svd_arrests$d
+V <- svd_arrests$v
+```
+ Confirm that the data of USArrests can be obtained as a product of: UDV^T
+```{r}
+U %*% diag(D) %*% t(V) - USArrests
+```
+ confirm that the sum equals USArrests
+```{r}
+X <- D[1] * U[,1] %*% t(V[,1])
+
+for(i in 2:4){
+  
+  X <- X + D[i] * U[,i] %*% t(V[,i])
+}
+
+X - U %*% diag(D) %*% t(V)
+```
+ create a new variable MA by by adding murder + assault
+```{r}
+MA <- USArrests$Murder + USArrests$Assault
+```
+ create a new data frame Arrests2 
+```{r}
+Arrests2 <- data.frame(USArrests, MA)
+```
+ compute the SVD of Arrests2
+```{r}
+svd_arrests2 <- svd(Arrests2)
+
+#compare the values
+D
+svd_arrests2$d
+
+```
+
+Arrests2 has 5 singular values instead of 4. d in arrests2 are greater than USArrsts for the values except for the third value and the fifth value is very small
+
+
+ what is the rank of arrests2
+```{r}
+library(matlib)
+
+R(as.matrix(Arrests2))
+
+```
+
+## Data Visualization
+
+```{r}
+library(ggplot2)
+
+
+
+U1 <- U[,1]
+U2 <- U[,2]
+plot(U1, U2)
+text(U1, U2, labels = row.names(USArrests))
+
+V1 <- V[,1]
+V2 <- V[,2]
+
+plot(V1, V2)
+text(V1, V2, labels = colnames(USArrests))
+
+
+
+```
+
+# Eigenvalue decomposition
+
+without using scale output mean centered data of USArrests
+```{r}
+
+mean_matrix <- cbind(rep(mean(USArrests[,1]), dim(USArrests)[1]), rep(mean(USArrests[,2]), dim(USArrests)[1]), rep(mean(USArrests[,3]), dim(USArrests)[1]), rep(mean(USArrests[,4]), dim(USArrests)[1]))
+
+X <- as.matrix(USArrests) - mean_matrix
+
+```
+Calculate the sum of squares and cross product matrix
+
+```{r}
+#sum of squares
+
+S <- t(X) %*% X
+
+cov_x <- 1/ (dim(X)[1] - 1) * t(X) %*% X
+# equivalence to covariance
+cov(X) - cov_x
+
+```
+
+ use solve to compute the inverse
+ 
+```{r}
+
+inverse_S <- solve(S)
+
+inverse_S
+
+evd_s <- eigen(S)
+
+A <- evd_s$values
+V <- evd_s$vectors
+
+inverse_S - (V %*% solve(diag(A) %*% t(V)))
+```
+
+## Power Method
+
+```{r, echo=FALSE}
+# useful lp norm function from hw 1
+
+lp_norm <- function(x, p = 1){
+  
+  if (p == "max") {
+    
+    return( max(abs(x)) )
+    
+  } else {
+    
+    return( sum(abs(x) ^p) ^ (1/p) )
+    
+  }
+
+}
+
+```
+
+```{r}
+# the power method
+# returns dominant eigenvalue and corresponding eigenvector
+Pow_Method <- function(vect, mat, iter){
+  
+  old <- vect
+  
+  for(k in 1:iter){
+    
+    newr <- (mat %*% old)
+    scaled <- lp_norm(newr, p = "max")
+    
+    newr <- newr / scaled
+    
+    print(paste('iteration = ', k))
+    print(newr)
+    print(scaled)
+    old <- newr
+    
+  }
+  
+  
+}
+A <- matrix(c(5, -4, 3, -14, 4, 6, 11, -4, -3), ncol = 3)
+w <- c(1,1,1)
+
+Pow_Method(w, A, 10)
+
+eigen(A)
+
+```
+
+## Deflation
+
+```{r}
+Q <- eigen(A)
+
+v <- Q$vectors[,1]
+lambda <- Q$values[1]
+
+A_deflated <- A - lambda * v %*% t(v)
+
+
+eigen(A_deflated)
+```
+
